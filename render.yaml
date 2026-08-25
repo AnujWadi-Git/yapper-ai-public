@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: yapper-ai-public
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: OPENROUTER_MODEL
+        value: openrouter/free
+      - key: TTS_PROVIDER
+        value: browser
+      - key: APP_NAME
+        value: Yapper AI
