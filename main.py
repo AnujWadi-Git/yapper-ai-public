@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import threading
 import uuid
+from datetime import datetime
 from pathlib import Path
 
 import edge_tts
@@ -14,14 +15,15 @@ from fastapi import Depends, FastAPI, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, EmailStr, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import auth
+import conversations
 import rag
 from db import get_db
-from models import User
+from models import Conversation, Message, User
 from tools import TOOL_SPECS, execute_tool_call
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -71,7 +73,19 @@ def warn_if_model_may_not_support_tools() -> None:
 
 class ChatRequest(BaseModel):
     text: str
-    history: list[dict[str, str]] = Field(default_factory=list)
+    conversation_id: str | None = None
+
+
+class ConversationSummary(BaseModel):
+    id: str
+    title: str
+    created_at: datetime
+
+
+class MessageOut(BaseModel):
+    role: str
+    content: str
+    created_at: datetime
 
 
 class SignupRequest(BaseModel):
@@ -187,12 +201,30 @@ def list_documents(user_id: str = Depends(auth.get_current_user_id)):
 
 
 @app.post("/chat")
-async def chat(request: ChatRequest, user_id: str = Depends(auth.get_current_user_id)):
+async def chat(
+    request: ChatRequest,
+    user_id: str = Depends(auth.get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
     user_text = request.text.strip()
     if not user_text:
         raise HTTPException(status_code=400, detail="Text is required.")
 
-    reply, tools_used = await safe_call_openrouter(user_text, request.history, user_id)
+    if request.conversation_id:
+        conversation = await conversations.get_owned_conversation(db, request.conversation_id, user_id)
+        if not conversation:
+            raise HTTPException(status_code=404, detail="Conversation not found.")
+        history = await conversations.load_history(db, conversation.id)
+    else:
+        conversation = await conversations.create_conversation(db, user_id, user_text)
+        history = []
+
+    reply, tools_used = await safe_call_openrouter(user_text, history, user_id)
+
+    conversations.save_message(db, conversation.id, "user", user_text)
+    conversations.save_message(db, conversation.id, "assistant", reply)
+    await db.commit()
+
     audio_path = await safe_generate_voice_audio(reply)
     audio_url = static_url(audio_path) if audio_path else None
     job_id = None
@@ -212,7 +244,42 @@ async def chat(request: ChatRequest, user_id: str = Depends(auth.get_current_use
         "video_url": None,
         "job_id": job_id,
         "tools_used": tools_used,
+        "conversation_id": str(conversation.id),
     }
+
+
+@app.get("/conversations", response_model=list[ConversationSummary])
+async def list_conversations(
+    user_id: str = Depends(auth.get_current_user_id), db: AsyncSession = Depends(get_db)
+):
+    result = await db.execute(
+        select(Conversation)
+        .where(Conversation.user_id == uuid.UUID(user_id))
+        .order_by(Conversation.created_at.desc())
+    )
+    return [
+        ConversationSummary(id=str(c.id), title=c.title, created_at=c.created_at)
+        for c in result.scalars().all()
+    ]
+
+
+@app.get("/conversations/{conversation_id}/messages", response_model=list[MessageOut])
+async def get_conversation_messages(
+    conversation_id: str,
+    user_id: str = Depends(auth.get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    conversation = await conversations.get_owned_conversation(db, conversation_id, user_id)
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found.")
+
+    result = await db.execute(
+        select(Message).where(Message.conversation_id == conversation.id).order_by(Message.created_at)
+    )
+    return [
+        MessageOut(role=m.role, content=m.content, created_at=m.created_at)
+        for m in result.scalars().all()
+    ]
 
 
 @app.get("/video-status/{job_id}")

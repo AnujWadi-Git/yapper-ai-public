@@ -31,7 +31,13 @@ similar after any deploy that adds a new required env var.
 - [x] Auth (signup/login, bcrypt, JWT in HttpOnly cookie, login rate limiting)
       — `/auth/signup`, `/auth/login`, `/auth/logout`, `/auth/me`. `/chat` and
       `/documents/*` now require a signed-in session; the `X-User-Id` stub is gone.
-- [ ] Conversation persistence (wiring `/chat` to actually write to the DB)
+- [x] Conversation persistence — `/chat` now saves every user/assistant
+      message to `conversations`/`messages`, keyed to the signed-in user.
+      `GET /conversations` lists a user's threads, `GET
+      /conversations/{id}/messages` loads one. History for a turn is loaded
+      from the DB (not the client) once a `conversation_id` is passed, so a
+      conversation now has real memory across requests, not just within one
+      client-held array.
 - [ ] Disable ElevenLabs / SadTalker in this build, browser `SpeechSynthesis` only
 - [ ] Per-user + global rate limiting on `/chat`
 - [ ] Frontend: login/signup, conversation history, rate-limit UI, cold-start UI
@@ -82,9 +88,23 @@ the sync `psycopg2` driver (the app itself uses `asyncpg`); both go through
 the same pooler. psycopg2 doesn't hit the prepared-statement issue above
 (different protocol), so migrations don't need the same workaround.
 
-Models (`users`, `conversations`, `messages`) exist and are migrated;
-`/auth/signup` and `/auth/login` write to and read from `users`, but `/chat`
-still doesn't persist conversations/messages yet -- next up.
+Models (`users`, `conversations`, `messages`) exist, are migrated, and are
+now all in active use (see Conversation persistence notes below).
+
+## Conversation persistence notes
+
+`/chat` takes an optional `conversation_id`. Omit it to start a new
+conversation (title auto-generated from the first message, truncated to 60
+chars); pass one back to continue an existing thread. Ownership is checked
+on every read/write in `conversations.py` (`get_owned_conversation`) --
+a conversation that doesn't belong to the caller (or doesn't exist) returns
+404, verified by testing one user against another's conversation ID directly.
+
+Multi-turn history is now loaded from the database on each request instead
+of trusted from the client -- previously the frontend held the whole
+conversation array and sent it back every time, which meant history could
+be edited/spoofed client-side and didn't survive a page reload. The `/chat`
+request schema dropped the old client-supplied `history` field as a result.
 
 ## Known gap found during setup
 
