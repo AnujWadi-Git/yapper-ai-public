@@ -21,7 +21,9 @@ not a bug).
       Alembic migrations — `users`, `conversations`, `messages` tables live.
       `pgvector` extension enabled for the later RAG persistence swap.
 - [x] Deploy: Render (free web service) + Supabase (free Postgres)
-- [ ] Auth (signup/login, bcrypt, JWT in HttpOnly cookie)
+- [x] Auth (signup/login, bcrypt, JWT in HttpOnly cookie, login rate limiting)
+      — `/auth/signup`, `/auth/login`, `/auth/logout`, `/auth/me`. `/chat` and
+      `/documents/*` now require a signed-in session; the `X-User-Id` stub is gone.
 - [ ] Conversation persistence (wiring `/chat` to actually write to the DB)
 - [ ] Disable ElevenLabs / SadTalker in this build, browser `SpeechSynthesis` only
 - [ ] Per-user + global rate limiting on `/chat`
@@ -38,10 +40,8 @@ Its `add_document` / `search` interface is designed to be swapped for a
 already enabled) — nothing in `main.py` needs to change beyond the import.
 Not done yet; tracked above.
 
-`user_id` is currently read from an `X-User-Id` request header
-(`get_user_id` in `main.py`) as a placeholder — **not real auth**. It will
-be replaced by the authenticated user's id from the JWT cookie once the
-auth step lands.
+`user_id` now comes from the authenticated session (`auth.get_current_user_id`,
+reading the `yapper_session` JWT cookie) — the old `X-User-Id` header stub is gone.
 
 Embeddings run through `fastembed` (ONNX runtime, `BAAI/bge-small-en-v1.5`,
 ~50MB) instead of `sentence-transformers`/PyTorch — the original choice blew
@@ -54,19 +54,30 @@ no ongoing API cost or rate limit).
 Postgres is Supabase's free tier, reached through the Supavisor **transaction
 pooler** (port 6543) rather than a direct connection — Supabase's direct
 connections are IPv6-only on new projects, and Render's free tier is
-IPv4-only. Transaction-mode pooling doesn't support server-side prepared
-statements, so `db.py` disables asyncpg's statement cache
-(`statement_cache_size: 0`); leaving that out causes intermittent "prepared
-statement already exists" errors under load.
+IPv4-only.
+
+Transaction-mode pooling doesn't support server-side prepared statements the
+way a normal Postgres connection does. `statement_cache_size: 0` in
+`db.py` alone isn't enough to fix this: asyncpg still auto-generates short,
+sequential prepared-statement names (`__asyncpg_stmt_N__`) per connection
+object, and since the pooler multiplexes many client connections onto few
+backend server connections, two different clients can land on a backend
+that already has a statement by that same auto-generated name from someone
+else's session -- `DuplicatePreparedStatementError`. Fixed by also passing
+`prepared_statement_name_func` so every prepared statement gets a globally
+unique (uuid-based) name instead. Verified by hammering `/auth/login`
+repeatedly with different failure paths in a row -- this reproduces reliably
+without the fix and disappears with it.
 
 Migrations: `alembic revision --autogenerate -m "..."` then `alembic upgrade
 head`. `migrations/env.py` reads `DATABASE_URL` from `.env` and runs through
 the sync `psycopg2` driver (the app itself uses `asyncpg`); both go through
-the same pooler.
+the same pooler. psycopg2 doesn't hit the prepared-statement issue above
+(different protocol), so migrations don't need the same workaround.
 
-Models (`users`, `conversations`, `messages`) exist and are migrated, but
-`/chat` doesn't write to them yet — that lands with the auth step, once there's
-a real `user_id` to attach conversations to instead of the `X-User-Id` stub.
+Models (`users`, `conversations`, `messages`) exist and are migrated;
+`/auth/signup` and `/auth/login` write to and read from `users`, but `/chat`
+still doesn't persist conversations/messages yet -- next up.
 
 ## Known gap found during setup
 

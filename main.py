@@ -10,13 +10,18 @@ from pathlib import Path
 import edge_tts
 import httpx
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, Header, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
+import auth
 import rag
+from db import get_db
+from models import User
 from tools import TOOL_SPECS, execute_tool_call
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -32,9 +37,18 @@ VIDEO_DIR.mkdir(exist_ok=True)
 
 app = FastAPI(title="Yapper AI")
 
+# Cookie-based auth means credentialed requests, which browsers refuse to
+# pair with a wildcard origin -- so this must be a real allowlist, not "*".
+_default_origins = "http://localhost:8000,http://127.0.0.1:8000,https://yapper-ai-public.onrender.com"
+ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv("ALLOWED_ORIGINS", _default_origins).split(",")
+    if origin.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -60,11 +74,25 @@ class ChatRequest(BaseModel):
     history: list[dict[str, str]] = Field(default_factory=list)
 
 
-def get_user_id(x_user_id: str | None = Header(default=None)) -> str:
-    # TEMPORARY: stands in for real auth until the JWT/session layer lands.
-    # The frontend/tests must send X-User-Id; replace with the authenticated
-    # user's id once login exists.
-    return x_user_id or "anonymous"
+class SignupRequest(BaseModel):
+    email: EmailStr
+    password: str
+
+    @field_validator("password")
+    @classmethod
+    def password_min_length(cls, value: str) -> str:
+        if len(value) < 8:
+            raise ValueError("Password must be at least 8 characters.")
+        return value
+
+
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class AuthResponse(BaseModel):
+    email: str
 
 
 SYSTEM_PROMPT = (
@@ -95,8 +123,54 @@ def favicon():
     return Response(status_code=204)
 
 
+@app.post("/auth/signup", response_model=AuthResponse)
+async def signup(payload: SignupRequest, response: Response, db: AsyncSession = Depends(get_db)):
+    email = payload.email.strip().lower()
+
+    existing = await db.scalar(select(User).where(User.email == email))
+    if existing:
+        raise HTTPException(status_code=400, detail="An account with that email already exists.")
+
+    user = User(email=email, password_hash=auth.hash_password(payload.password))
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
+
+    auth.set_session_cookie(response, auth.create_access_token(str(user.id)))
+    return AuthResponse(email=user.email)
+
+
+@app.post("/auth/login", response_model=AuthResponse)
+async def login(
+    payload: LoginRequest, request: Request, response: Response, db: AsyncSession = Depends(get_db)
+):
+    auth.enforce_login_rate_limit(request)
+
+    email = payload.email.strip().lower()
+    user = await db.scalar(select(User).where(User.email == email))
+    if not user or not auth.verify_password(payload.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Invalid email or password.")
+
+    auth.set_session_cookie(response, auth.create_access_token(str(user.id)))
+    return AuthResponse(email=user.email)
+
+
+@app.post("/auth/logout")
+def logout(response: Response):
+    auth.clear_session_cookie(response)
+    return {"ok": True}
+
+
+@app.get("/auth/me", response_model=AuthResponse)
+async def me(user_id: str = Depends(auth.get_current_user_id), db: AsyncSession = Depends(get_db)):
+    user = await db.get(User, uuid.UUID(user_id))
+    if not user:
+        raise HTTPException(status_code=401, detail="Please sign in to continue.")
+    return AuthResponse(email=user.email)
+
+
 @app.post("/documents/upload")
-async def upload_document(file: UploadFile, user_id: str = Depends(get_user_id)):
+async def upload_document(file: UploadFile, user_id: str = Depends(auth.get_current_user_id)):
     content = await file.read()
     try:
         result = await asyncio.to_thread(
@@ -108,12 +182,12 @@ async def upload_document(file: UploadFile, user_id: str = Depends(get_user_id))
 
 
 @app.get("/documents")
-def list_documents(user_id: str = Depends(get_user_id)):
+def list_documents(user_id: str = Depends(auth.get_current_user_id)):
     return {"documents": rag.document_store.list_documents(user_id)}
 
 
 @app.post("/chat")
-async def chat(request: ChatRequest, user_id: str = Depends(get_user_id)):
+async def chat(request: ChatRequest, user_id: str = Depends(auth.get_current_user_id)):
     user_text = request.text.strip()
     if not user_text:
         raise HTTPException(status_code=400, detail="Text is required.")
