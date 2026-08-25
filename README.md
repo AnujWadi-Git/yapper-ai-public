@@ -10,6 +10,13 @@ public deploy never risks pulling in unrelated files.
 from `main` on every push. Cold-starts after ~15 min idle (free-tier behavior,
 not a bug).
 
+Gotcha hit once already: if you push code and change env vars close together,
+the code-triggered deploy can start before the env var change lands, so the
+live instance boots without the new value (saw this as `RuntimeError: Missing
+JWT_SECRET` right after adding auth). Fix is just triggering one more manual
+deploy after env vars are confirmed set. Worth a glance at `/auth/me` or
+similar after any deploy that adds a new required env var.
+
 ## Status
 
 - [x] Step 0: reviewed existing single-user codebase
