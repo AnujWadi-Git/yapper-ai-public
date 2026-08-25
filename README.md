@@ -44,9 +44,13 @@ similar after any deploy that adds a new required env var.
 - [x] Frontend: login/signup, conversation history sidebar, cold-start
       "waking up" banner. Verified the full signup → chat (with a real tool
       call) → new-chat → switch-conversation → logout flow in a real browser.
-- [ ] Per-user + global rate limiting on `/chat`
-- [ ] End-to-end verification on free tiers, including hitting OpenRouter's
-      shared rate limit on purpose
+- [x] Per-user + shared rate limiting on `/chat` — 20 messages/user/day
+      (DB-backed, resets at UTC midnight, no separate counter table); a
+      distinct friendly message when OpenRouter's *shared* free-tier limit
+      is hit, separate from hitting your own daily cap. See notes below.
+- [x] End-to-end verification on free tiers, including hitting OpenRouter's
+      shared rate limit on purpose — actually reproduced it (not simulated)
+      and confirmed the graceful message end-to-end. See notes below.
 
 ## RAG layer notes
 
@@ -109,6 +113,36 @@ of trusted from the client -- previously the frontend held the whole
 conversation array and sent it back every time, which meant history could
 be edited/spoofed client-side and didn't survive a page reload. The `/chat`
 request schema dropped the old client-supplied `history` field as a result.
+
+## Rate limiting notes
+
+Two independent limits, for two different problems:
+
+**Per-user daily cap** (`conversations.DAILY_MESSAGE_LIMIT = 20`): counts
+each user's own `role='user'` rows in `messages` since UTC midnight --
+reuses the existing table instead of a separate counter, so it needs no
+cron/cleanup job and survives restarts for free. `/chat` checks this before
+doing any OpenRouter work, so a user who's already over their limit doesn't
+cost a wasted upstream call. Verified by seeding 20 messages for a test user
+directly in Postgres and confirming the 21st `/chat` call returns 429 with
+`"You've reached today's limit of 20 messages..."`, while a second,
+fresh user is unaffected (isolation, not a global counter).
+
+**Shared OpenRouter free-tier limit**: this is a different failure and gets
+different handling. `_post_openrouter` now raises a distinct
+`OpenRouterRateLimited` when OpenRouter returns HTTP 429 *or* embeds a
+`{"error": {"code": 429}}` in an HTTP 200 body (both happen in practice --
+verified by reading a live OpenRouter response so this isn't a guess).
+`safe_call_openrouter` catches that specifically and returns "Yapper is busy
+right now, try again in a minute" as the assistant's reply -- a normal 200
+chat response, not an HTTP error, so the frontend doesn't need special
+handling beyond just showing it.
+
+This was verified against the real shared limit, not simulated: fired a
+burst of concurrent requests at a free OpenRouter model until it started
+returning 429, then pointed `/chat` at that same model and confirmed the
+"Yapper is busy" message came back end-to-end instead of a crash or raw
+error. Reverted `OPENROUTER_MODEL` back to a working free model afterward.
 
 ## Voice/video notes
 

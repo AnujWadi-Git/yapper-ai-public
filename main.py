@@ -196,6 +196,16 @@ async def chat(
     if not user_text:
         raise HTTPException(status_code=400, detail="Text is required.")
 
+    messages_today = await conversations.count_user_messages_today(db, user_id)
+    if messages_today >= conversations.DAILY_MESSAGE_LIMIT:
+        raise HTTPException(
+            status_code=429,
+            detail=(
+                f"You've reached today's limit of {conversations.DAILY_MESSAGE_LIMIT} messages. "
+                "Come back tomorrow for more!"
+            ),
+        )
+
     if request.conversation_id:
         conversation = await conversations.get_owned_conversation(db, request.conversation_id, user_id)
         if not conversation:
@@ -253,11 +263,18 @@ async def get_conversation_messages(
     ]
 
 
+class OpenRouterRateLimited(RuntimeError):
+    """The shared OpenRouter free-tier rate limit was hit (not this user's own limit)."""
+
+
 async def safe_call_openrouter(
     user_text: str, history: list[dict[str, str]], user_id: str
 ) -> tuple[str, list[str]]:
     try:
         return await call_openrouter(user_text, history, user_id)
+    except OpenRouterRateLimited as error:
+        print(f"OpenRouter shared rate limit hit: {error}")
+        return ("Yapper is busy right now, try again in a minute.", [])
     except Exception as error:
         print(f"OpenRouter failed: {error}")
         return (
@@ -343,10 +360,22 @@ async def _post_openrouter(messages: list[dict], use_tools: bool) -> dict:
     except httpx.RequestError as error:
         raise RuntimeError(f"Could not reach OpenRouter: {error}") from error
 
+    if response.status_code == 429:
+        raise OpenRouterRateLimited(response.text)
+
     if response.status_code >= 400:
         raise RuntimeError(f"OpenRouter error: {response.text}")
 
     data = response.json()
+
+    # OpenRouter sometimes reports upstream provider errors (including rate
+    # limits) inside a 200 response body instead of the HTTP status code.
+    error = data.get("error")
+    if error:
+        if error.get("code") == 429:
+            raise OpenRouterRateLimited(str(error))
+        raise RuntimeError(f"OpenRouter error: {error}")
+
     return data["choices"][0]["message"]
 
 

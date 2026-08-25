@@ -868,14 +868,13 @@
           return;
         }
 
-        if (response.status === 429) {
-          thinkingMessage.remove();
-          addMessage("Yapper is getting a lot of messages right now. Please wait a minute and try again.", "bot");
-          return;
-        }
-
         const data = await response.json();
         thinkingMessage.remove();
+
+        if (response.status === 429) {
+          addMessage(data.detail || "Yapper is getting a lot of messages right now. Please wait a bit.", "bot");
+          return;
+        }
 
         if (!response.ok) {
           addMessage(data.detail || "Something went wrong.", "bot");
