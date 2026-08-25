@@ -38,9 +38,13 @@ similar after any deploy that adds a new required env var.
       from the DB (not the client) once a `conversation_id` is passed, so a
       conversation now has real memory across requests, not just within one
       client-held array.
-- [ ] Disable ElevenLabs / SadTalker in this build, browser `SpeechSynthesis` only
+- [x] Disable ElevenLabs / SadTalker in this build, browser `SpeechSynthesis`
+      only — both removed entirely from `main.py` (not just default-off);
+      see Voice/video notes below.
+- [x] Frontend: login/signup, conversation history sidebar, cold-start
+      "waking up" banner. Verified the full signup → chat (with a real tool
+      call) → new-chat → switch-conversation → logout flow in a real browser.
 - [ ] Per-user + global rate limiting on `/chat`
-- [ ] Frontend: login/signup, conversation history, rate-limit UI, cold-start UI
 - [ ] End-to-end verification on free tiers, including hitting OpenRouter's
       shared rate limit on purpose
 
@@ -105,6 +109,36 @@ of trusted from the client -- previously the frontend held the whole
 conversation array and sent it back every time, which meant history could
 be edited/spoofed client-side and didn't survive a page reload. The `/chat`
 request schema dropped the old client-supplied `history` field as a result.
+
+## Voice/video notes
+
+ElevenLabs and SadTalker are not just disabled by config in this build --
+their code is gone from `main.py` (no `edge-tts`/`httpx`-to-ElevenLabs calls,
+no `/video-status` endpoint, no background video-job thread, no `static/`
+audio/video dirs). Both still exist in the original single-user
+`Yapper-AI-main` project (and in this repo's git history before this
+commit) for local-only use, per the cost math in the original brief: neither
+has a free tier that survives real multi-user traffic. `index.html` calls
+the browser's `SpeechSynthesis` API directly -- genuinely free, runs
+client-side, no server involvement or rate limit regardless of traffic.
+
+## Frontend notes
+
+`index.html` is a single-page app now: an auth screen (login/signup toggle)
+gates a chat screen (conversation sidebar + chat + avatar), switching on
+whether `GET /auth/me` succeeds on load. All `fetch` calls use
+`credentials: "same-origin"` so the session cookie rides along automatically
+-- no manual token handling in JS, consistent with keeping the JWT out of
+reach of XSS.
+
+Cold start: on boot, if `/auth/me` hasn't resolved within ~2.5s, a banner
+explains the free-tier server may be waking up from sleep, rather than the
+page just looking broken/stuck.
+
+`/chat`'s 401 (session expired) and 429 (rate limited, once Step 5 lands)
+responses are both handled with a plain-language message instead of a raw
+error or a crash -- per the "must be handled gracefully in the UI, not
+hidden" requirement in the original brief.
 
 ## Known gap found during setup
 

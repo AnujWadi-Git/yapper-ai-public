@@ -3,8 +3,4 @@ __pycache__/
 *.pyc
 .venv/
 venv/
-static/audio/*
-!static/audio/.gitkeep
-static/videos/*
-!static/videos/.gitkeep
 .DS_Store

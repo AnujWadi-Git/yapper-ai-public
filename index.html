@@ -17,9 +17,17 @@
     }
 
     .app {
-      width: min(920px, 100%);
+      width: min(1100px, 100%);
       margin: 0 auto;
       padding: 24px;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 20px;
     }
 
     h1 {
@@ -28,13 +36,21 @@
     }
 
     .subtitle {
-      margin: 0 0 20px;
+      margin: 0;
+      color: #52616f;
+    }
+
+    .account {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 14px;
       color: #52616f;
     }
 
     .layout {
       display: grid;
-      grid-template-columns: 1fr 320px;
+      grid-template-columns: 220px 1fr 320px;
       gap: 16px;
       align-items: start;
     }
@@ -44,6 +60,135 @@
       border: 1px solid #d9e1e8;
       border-radius: 8px;
       padding: 16px;
+    }
+
+    /* --- Cold-start / connecting banner --- */
+
+    .boot-banner {
+      display: none;
+      align-items: center;
+      gap: 10px;
+      background: #fff6e0;
+      border: 1px solid #e9d38f;
+      color: #6b5518;
+      border-radius: 8px;
+      padding: 10px 14px;
+      margin-bottom: 16px;
+      font-size: 14px;
+    }
+
+    .boot-banner.visible {
+      display: flex;
+    }
+
+    /* --- Auth screen --- */
+
+    .auth-screen {
+      display: none;
+      max-width: 380px;
+      margin: 48px auto;
+    }
+
+    .auth-screen.visible {
+      display: block;
+    }
+
+    .auth-screen h2 {
+      margin-top: 0;
+    }
+
+    .auth-field {
+      margin-bottom: 12px;
+    }
+
+    .auth-field label {
+      display: block;
+      font-size: 13px;
+      color: #52616f;
+      margin-bottom: 4px;
+    }
+
+    .auth-field input {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #c8d2dc;
+      border-radius: 8px;
+      font-size: 15px;
+    }
+
+    .auth-error {
+      color: #a33;
+      font-size: 14px;
+      min-height: 20px;
+      margin-bottom: 8px;
+    }
+
+    .auth-switch {
+      margin-top: 14px;
+      font-size: 14px;
+      color: #52616f;
+    }
+
+    .auth-switch a {
+      color: #1f7a8c;
+      cursor: pointer;
+      text-decoration: underline;
+    }
+
+    /* --- Main app (hidden until authenticated) --- */
+
+    .main-app {
+      display: none;
+    }
+
+    .main-app.visible {
+      display: block;
+    }
+
+    /* --- Conversation sidebar --- */
+
+    .sidebar h3 {
+      margin: 0 0 10px;
+      font-size: 15px;
+    }
+
+    .new-chat-btn {
+      width: 100%;
+      margin-bottom: 10px;
+      background: #34495e;
+    }
+
+    .conversation-list {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      max-height: 480px;
+      overflow-y: auto;
+    }
+
+    .conversation-item {
+      padding: 8px 10px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13.5px;
+      color: #34495e;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .conversation-item:hover {
+      background: #eef2f5;
+    }
+
+    .conversation-item.active {
+      background: #dff2ff;
+      color: #17202a;
+    }
+
+    .conversation-empty {
+      color: #93a1ac;
+      font-size: 13px;
     }
 
     .chat-box {
@@ -125,22 +270,17 @@
       background: #34495e;
     }
 
+    button.link {
+      background: transparent;
+      color: #1f7a8c;
+      min-height: auto;
+      padding: 4px 8px;
+      font-size: 13px;
+    }
+
     button:disabled {
       opacity: 0.55;
       cursor: not-allowed;
-    }
-
-    video {
-      width: 100%;
-      background: #111;
-      border-radius: 8px;
-      display: block;
-      aspect-ratio: 1 / 1;
-      object-fit: cover;
-    }
-
-    video.hidden {
-      display: none;
     }
 
     .avatar {
@@ -407,9 +547,13 @@
       }
     }
 
-    @media (max-width: 760px) {
+    @media (max-width: 900px) {
       .layout {
         grid-template-columns: 1fr;
+      }
+
+      .sidebar {
+        order: 3;
       }
 
       .controls {
@@ -424,55 +568,115 @@
 </head>
 <body>
   <main class="app">
-    <h1>Yapper AI</h1>
-    <p class="subtitle">Type or talk. Yapper replies, speaks, and can generate a talking face video.</p>
-
-    <section class="layout">
-      <div class="panel">
-        <div id="chatBox" class="chat-box"></div>
-
-        <div class="controls">
-          <textarea id="messageInput" placeholder="Say something to Yapper... Use Shift+Enter for a new line."></textarea>
-          <button id="sendButton">Send</button>
-          <button id="micButton" class="secondary">Mic</button>
-        </div>
+    <div class="topbar">
+      <div>
+        <h1>Yapper AI</h1>
+        <p class="subtitle">Type or talk. Yapper replies and speaks using your browser's voice.</p>
       </div>
+      <div id="account" class="account" style="display: none;">
+        <span id="accountEmail"></span>
+        <button id="logoutButton" class="link">Log out</button>
+      </div>
+    </div>
 
-      <aside class="panel">
-        <div id="avatar" class="avatar happy" aria-label="Animated Yapper human avatar">
-          <div class="portrait">
-            <div class="shoulders"></div>
-            <div class="neck"></div>
-            <div class="ear left"></div>
-            <div class="ear right"></div>
-            <div class="hair"></div>
-            <div class="face">
-              <div class="eyebrow left"></div>
-              <div class="eyebrow right"></div>
-              <div class="eye left"></div>
-              <div class="eye right"></div>
-              <div class="nose"></div>
-              <div class="mouth"></div>
-            </div>
+    <div id="bootBanner" class="boot-banner">
+      <span class="spinner"></span>
+      <span id="bootBannerText">Connecting to Yapper...</span>
+    </div>
+
+    <!-- Auth screen: shown until a session cookie is confirmed -->
+    <section id="authScreen" class="auth-screen panel">
+      <h2 id="authTitle">Log in</h2>
+      <div id="authError" class="auth-error"></div>
+      <div class="auth-field">
+        <label for="authEmail">Email</label>
+        <input id="authEmail" type="email" autocomplete="email" />
+      </div>
+      <div class="auth-field">
+        <label for="authPassword">Password</label>
+        <input id="authPassword" type="password" autocomplete="current-password" />
+      </div>
+      <button id="authSubmit" style="width: 100%;">Log in</button>
+      <div class="auth-switch">
+        <span id="authSwitchPrompt">Don't have an account?</span>
+        <a id="authSwitchLink">Sign up</a>
+      </div>
+    </section>
+
+    <!-- Main app: shown once authenticated -->
+    <section id="mainApp" class="main-app">
+      <div class="layout">
+        <aside class="panel sidebar">
+          <h3>Conversations</h3>
+          <button id="newChatButton" class="new-chat-btn">+ New chat</button>
+          <div id="conversationList" class="conversation-list">
+            <div class="conversation-empty">No conversations yet.</div>
+          </div>
+        </aside>
+
+        <div class="panel">
+          <div id="chatBox" class="chat-box"></div>
+
+          <div class="controls">
+            <textarea id="messageInput" placeholder="Say something to Yapper... Use Shift+Enter for a new line."></textarea>
+            <button id="sendButton">Send</button>
+            <button id="micButton" class="secondary">Mic</button>
           </div>
         </div>
-        <video id="faceVideo" class="hidden" controls playsinline></video>
-        <div id="videoStatus" class="status hidden"></div>
-      </aside>
+
+        <aside class="panel">
+          <div id="avatar" class="avatar happy" aria-label="Animated Yapper human avatar">
+            <div class="portrait">
+              <div class="shoulders"></div>
+              <div class="neck"></div>
+              <div class="ear left"></div>
+              <div class="ear right"></div>
+              <div class="hair"></div>
+              <div class="face">
+                <div class="eyebrow left"></div>
+                <div class="eyebrow right"></div>
+                <div class="eye left"></div>
+                <div class="eye right"></div>
+                <div class="nose"></div>
+                <div class="mouth"></div>
+              </div>
+            </div>
+          </div>
+          <div id="chatStatus" class="status hidden"></div>
+        </aside>
+      </div>
     </section>
   </main>
 
   <script>
+    const bootBanner = document.getElementById("bootBanner");
+    const bootBannerText = document.getElementById("bootBannerText");
+    const authScreen = document.getElementById("authScreen");
+    const authTitle = document.getElementById("authTitle");
+    const authError = document.getElementById("authError");
+    const authEmail = document.getElementById("authEmail");
+    const authPassword = document.getElementById("authPassword");
+    const authSubmit = document.getElementById("authSubmit");
+    const authSwitchPrompt = document.getElementById("authSwitchPrompt");
+    const authSwitchLink = document.getElementById("authSwitchLink");
+    const account = document.getElementById("account");
+    const accountEmail = document.getElementById("accountEmail");
+    const logoutButton = document.getElementById("logoutButton");
+    const mainApp = document.getElementById("mainApp");
+    const newChatButton = document.getElementById("newChatButton");
+    const conversationList = document.getElementById("conversationList");
     const chatBox = document.getElementById("chatBox");
     const messageInput = document.getElementById("messageInput");
     const sendButton = document.getElementById("sendButton");
     const micButton = document.getElementById("micButton");
     const avatar = document.getElementById("avatar");
-    const faceVideo = document.getElementById("faceVideo");
-    const videoStatus = document.getElementById("videoStatus");
-    const conversationHistory = [];
-    let currentAudio = null;
+    const chatStatus = document.getElementById("chatStatus");
+
+    let authMode = "login"; // or "signup"
+    let currentConversationId = null;
     let availableVoices = [];
+
+    // ---------- Voice (browser SpeechSynthesis only -- no server TTS cost) ----------
 
     function loadVoices() {
       if (!("speechSynthesis" in window)) return;
@@ -484,124 +688,11 @@
       window.speechSynthesis.onvoiceschanged = loadVoices;
     }
 
-    function addMessage(text, className) {
-      const message = document.createElement("div");
-      message.className = `message ${className}`;
-      message.textContent = text;
-      chatBox.appendChild(message);
-      chatBox.scrollTop = chatBox.scrollHeight;
-      return message;
-    }
-
-    function setVideoStatus(text, showSpinner) {
-      if (!text) {
-        videoStatus.className = "status hidden";
-        videoStatus.innerHTML = "";
-        return;
-      }
-
-      videoStatus.className = "status";
-      videoStatus.innerHTML = "";
-
-      if (showSpinner) {
-        const spinner = document.createElement("span");
-        spinner.className = "spinner";
-        videoStatus.appendChild(spinner);
-      }
-
-      const label = document.createElement("span");
-      label.textContent = text;
-      videoStatus.appendChild(label);
-    }
-
-    function showAvatar() {
-      avatar.style.display = "grid";
-      faceVideo.classList.add("hidden");
-    }
-
-    async function showVideo(videoUrl) {
-      avatar.style.display = "none";
-      faceVideo.classList.remove("hidden");
-      faceVideo.src = videoUrl + "?t=" + Date.now();
-      await faceVideo.play().catch(() => {});
-    }
-
-    function speak(text) {
-      if (!("speechSynthesis" in window)) return;
-
-      const speechText = cleanTextForSpeech(text);
-      if (!speechText || speechText.length > 700) return;
-
-      window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(speechText);
-      const voice = pickVoice();
-
-      if (voice) utterance.voice = voice;
-      utterance.rate = 0.9;
-      utterance.pitch = 1.03;
-      utterance.volume = 1;
-      utterance.onstart = () => avatar.classList.add("speaking");
-      utterance.onend = () => avatar.classList.remove("speaking");
-      utterance.onerror = () => avatar.classList.remove("speaking");
-      window.speechSynthesis.speak(utterance);
-    }
-
-    async function playGeneratedAudio(audioUrl, fallbackText) {
-      if (!audioUrl) {
-        speak(fallbackText);
-        return;
-      }
-
-      if (currentAudio) {
-        currentAudio.pause();
-        currentAudio = null;
-      }
-
-      if ("speechSynthesis" in window) {
-        window.speechSynthesis.cancel();
-      }
-
-      currentAudio = new Audio(audioUrl + "?t=" + Date.now());
-      currentAudio.onplay = () => avatar.classList.add("speaking");
-      currentAudio.onended = () => avatar.classList.remove("speaking");
-      currentAudio.onerror = () => {
-        avatar.classList.remove("speaking");
-        speak(fallbackText);
-      };
-
-      await currentAudio.play().catch(() => {
-        avatar.classList.remove("speaking");
-        speak(fallbackText);
-      });
-    }
-
-    function setExpression(text) {
-      const lower = text.toLowerCase();
-      avatar.classList.remove("happy", "thinking", "serious", "excited");
-
-      if (/[?!]{2,}/.test(text) || lower.includes("awesome") || lower.includes("great")) {
-        avatar.classList.add("excited");
-      } else if (lower.includes("sorry") || lower.includes("error") || lower.includes("can't") || lower.includes("cannot")) {
-        avatar.classList.add("serious");
-      } else if (lower.includes("maybe") || lower.includes("let's think") || lower.includes("question")) {
-        avatar.classList.add("thinking");
-      } else {
-        avatar.classList.add("happy");
-      }
-    }
-
     function pickVoice() {
       const preferredNames = [
-        "Samantha",
-        "Karen",
-        "Moira",
-        "Daniel",
-        "Alex",
-        "Google US English",
-        "Microsoft Aria",
-        "Microsoft Jenny"
+        "Samantha", "Karen", "Moira", "Daniel", "Alex",
+        "Google US English", "Microsoft Aria", "Microsoft Jenny"
       ];
-
       return preferredNames
         .map((name) => availableVoices.find((voice) => voice.name.includes(name)))
         .find(Boolean) || availableVoices.find((voice) => voice.lang.startsWith("en")) || null;
@@ -619,17 +710,140 @@
         .trim();
     }
 
+    function speak(text) {
+      if (!("speechSynthesis" in window)) return;
+      const speechText = cleanTextForSpeech(text);
+      if (!speechText || speechText.length > 700) return;
+
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(speechText);
+      const voice = pickVoice();
+      if (voice) utterance.voice = voice;
+      utterance.rate = 0.9;
+      utterance.pitch = 1.03;
+      utterance.volume = 1;
+      utterance.onstart = () => avatar.classList.add("speaking");
+      utterance.onend = () => avatar.classList.remove("speaking");
+      utterance.onerror = () => avatar.classList.remove("speaking");
+      window.speechSynthesis.speak(utterance);
+    }
+
+    function setExpression(text) {
+      const lower = text.toLowerCase();
+      avatar.classList.remove("happy", "thinking", "serious", "excited");
+
+      if (/[?!]{2,}/.test(text) || lower.includes("awesome") || lower.includes("great")) {
+        avatar.classList.add("excited");
+      } else if (lower.includes("sorry") || lower.includes("error") || lower.includes("can't") || lower.includes("cannot")) {
+        avatar.classList.add("serious");
+      } else if (lower.includes("maybe") || lower.includes("let's think") || lower.includes("question")) {
+        avatar.classList.add("thinking");
+      } else {
+        avatar.classList.add("happy");
+      }
+    }
+
+    function setChatStatus(text) {
+      if (!text) {
+        chatStatus.className = "status hidden";
+        chatStatus.textContent = "";
+        return;
+      }
+      chatStatus.className = "status";
+      chatStatus.textContent = text;
+    }
+
+    // ---------- Chat rendering ----------
+
+    function addMessage(text, className) {
+      const message = document.createElement("div");
+      message.className = `message ${className}`;
+      message.textContent = text;
+      chatBox.appendChild(message);
+      chatBox.scrollTop = chatBox.scrollHeight;
+      return message;
+    }
+
+    function clearChat() {
+      chatBox.innerHTML = "";
+    }
+
+    function renderHistory(messages) {
+      clearChat();
+      if (!messages.length) {
+        addMessage("Hey, I'm Yapper AI. What's on your mind?", "bot");
+        setExpression("Hey, I'm Yapper AI. What's on your mind?");
+        return;
+      }
+      for (const message of messages) {
+        addMessage(message.content, message.role === "user" ? "user" : "bot");
+      }
+      setExpression(messages[messages.length - 1].content);
+    }
+
+    // ---------- Conversations ----------
+
+    async function loadConversations() {
+      try {
+        const response = await fetch("/conversations", { credentials: "same-origin" });
+        if (!response.ok) return;
+        const items = await response.json();
+        renderConversationList(items);
+      } catch (error) {
+        // Non-fatal -- the sidebar just stays empty/stale.
+      }
+    }
+
+    function renderConversationList(items) {
+      conversationList.innerHTML = "";
+      if (!items.length) {
+        conversationList.innerHTML = '<div class="conversation-empty">No conversations yet.</div>';
+        return;
+      }
+      for (const item of items) {
+        const row = document.createElement("div");
+        row.className = "conversation-item" + (item.id === currentConversationId ? " active" : "");
+        row.textContent = item.title;
+        row.title = item.title;
+        row.addEventListener("click", () => openConversation(item.id));
+        conversationList.appendChild(row);
+      }
+    }
+
+    async function openConversation(conversationId) {
+      currentConversationId = conversationId;
+      try {
+        const response = await fetch(`/conversations/${conversationId}/messages`, { credentials: "same-origin" });
+        if (!response.ok) {
+          addMessage("Could not load that conversation.", "bot");
+          return;
+        }
+        const messages = await response.json();
+        renderHistory(messages);
+        await loadConversations(); // refresh active-row highlighting
+      } catch (error) {
+        addMessage("Network error loading that conversation.", "bot");
+      }
+    }
+
+    function startNewChat() {
+      currentConversationId = null;
+      clearChat();
+      addMessage("Hey, I'm Yapper AI. What's on your mind?", "bot");
+      setExpression("Hey, I'm Yapper AI. What's on your mind?");
+      loadConversations();
+    }
+
+    // ---------- Sending messages ----------
+
     async function sendMessage(textFromMic) {
       const text = (textFromMic || messageInput.value).trim();
       if (!text) return;
 
       addMessage(text, "user");
-      conversationHistory.push({ role: "user", content: text });
       messageInput.value = "";
       sendButton.disabled = true;
       micButton.disabled = true;
-      setVideoStatus("", false);
-      showAvatar();
       const thinkingMessage = addMessage("Yapper is thinking...", "bot loading");
 
       try {
@@ -639,56 +853,61 @@
         const response = await fetch("/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
           signal: controller.signal,
           body: JSON.stringify({
             text,
-            history: conversationHistory.slice(-10)
+            conversation_id: currentConversationId
           })
         });
         clearTimeout(timeoutId);
+
+        if (response.status === 401) {
+          thinkingMessage.remove();
+          showAuthScreen("Your session expired. Please log in again.");
+          return;
+        }
+
+        if (response.status === 429) {
+          thinkingMessage.remove();
+          addMessage("Yapper is getting a lot of messages right now. Please wait a minute and try again.", "bot");
+          return;
+        }
 
         const data = await response.json();
         thinkingMessage.remove();
 
         if (!response.ok) {
           addMessage(data.detail || "Something went wrong.", "bot");
-          conversationHistory.pop();
           return;
         }
 
         const reply = data.reply || data.text || "";
+        const isNewConversation = !currentConversationId;
+        currentConversationId = data.conversation_id || currentConversationId;
 
         addMessage(reply, "bot");
         if (Array.isArray(data.tools_used) && data.tools_used.length) {
           const badge = document.createElement("div");
           badge.className = "message bot";
-          badge.style.cssText =
-            "opacity:0.7;font-size:0.78rem;font-style:italic;padding-top:0;";
+          badge.style.cssText = "opacity:0.7;font-size:0.78rem;font-style:italic;padding-top:0;";
           badge.textContent = "\u{1F527} used: " + data.tools_used.join(", ");
           chatBox.appendChild(badge);
           chatBox.scrollTop = chatBox.scrollHeight;
         }
-        conversationHistory.push({ role: "assistant", content: reply });
-        setExpression(reply);
-        playGeneratedAudio(data.audio_url, reply);
 
-        if (data.video_url) {
-          setVideoStatus("", false);
-          await showVideo(data.video_url);
-        } else if (data.job_id) {
-          setVideoStatus("Generating lip-sync video...", true);
-          pollVideoStatus(data.job_id);
-        } else {
-          setVideoStatus("", false);
-          showAvatar();
+        setExpression(reply);
+        speak(reply);
+
+        if (isNewConversation) {
+          await loadConversations();
         }
       } catch (error) {
         thinkingMessage.remove();
-        conversationHistory.pop();
         if (error.name === "AbortError") {
           addMessage("That took too long. Try a shorter prompt or send it in smaller chunks.", "bot");
         } else {
-          addMessage("Network error. Is the FastAPI server running?", "bot");
+          addMessage("Network error. Is the server reachable?", "bot");
         }
       } finally {
         sendButton.disabled = false;
@@ -697,49 +916,8 @@
       }
     }
 
-    async function pollVideoStatus(jobId) {
-      try {
-        const response = await fetch(`/video-status/${jobId}`);
-        const job = await response.json();
-
-        if (!response.ok) {
-          setVideoStatus(job.detail || "Video status unavailable.", false);
-          return;
-        }
-
-        if (job.status === "queued") {
-          setVideoStatus("Video queued...", true);
-          setTimeout(() => pollVideoStatus(jobId), 5000);
-          return;
-        }
-
-        if (job.status === "processing") {
-          setVideoStatus("Generating lip-sync video...", true);
-          setTimeout(() => pollVideoStatus(jobId), 5000);
-          return;
-        }
-
-        if (job.status === "done" && job.video_url) {
-          setVideoStatus("", false);
-          await showVideo(job.video_url);
-          return;
-        }
-
-        if (job.status === "failed") {
-          setVideoStatus("Video generation failed, but the reply and voice still work.", false);
-          showAvatar();
-          return;
-        }
-
-        setVideoStatus("Video status unknown.", false);
-      } catch (error) {
-        setVideoStatus("Could not check video status.", false);
-      }
-    }
-
     function startMic() {
       const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-
       if (!SpeechRecognition) {
         alert("Speech recognition is not supported in this browser. Try Chrome.");
         return;
@@ -757,11 +935,9 @@
         const transcript = event.results[0][0].transcript;
         sendMessage(transcript);
       };
-
       recognition.onerror = () => {
         alert("Could not hear you clearly. Try again.");
       };
-
       recognition.onend = () => {
         micButton.textContent = "Mic";
         micButton.disabled = false;
@@ -772,6 +948,7 @@
 
     sendButton.addEventListener("click", () => sendMessage());
     micButton.addEventListener("click", startMic);
+    newChatButton.addEventListener("click", startNewChat);
     messageInput.addEventListener("keydown", (event) => {
       if (event.key === "Enter" && !event.shiftKey) {
         event.preventDefault();
@@ -779,8 +956,126 @@
       }
     });
 
-    addMessage("Hey, I'm Yapper AI. What's on your mind?", "bot");
-    setExpression("Hey, I'm Yapper AI. What's on your mind?");
+    // ---------- Auth ----------
+
+    function setAuthMode(mode) {
+      authMode = mode;
+      authError.textContent = "";
+      if (mode === "login") {
+        authTitle.textContent = "Log in";
+        authSubmit.textContent = "Log in";
+        authSwitchPrompt.textContent = "Don't have an account?";
+        authSwitchLink.textContent = "Sign up";
+      } else {
+        authTitle.textContent = "Sign up";
+        authSubmit.textContent = "Sign up";
+        authSwitchPrompt.textContent = "Already have an account?";
+        authSwitchLink.textContent = "Log in";
+      }
+    }
+
+    authSwitchLink.addEventListener("click", () => {
+      setAuthMode(authMode === "login" ? "signup" : "login");
+    });
+
+    async function submitAuth() {
+      const email = authEmail.value.trim();
+      const password = authPassword.value;
+      authError.textContent = "";
+
+      if (!email || !password) {
+        authError.textContent = "Email and password are required.";
+        return;
+      }
+
+      authSubmit.disabled = true;
+      const endpoint = authMode === "login" ? "/auth/login" : "/auth/signup";
+
+      try {
+        const response = await fetch(endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({ email, password })
+        });
+        const data = await response.json();
+
+        if (!response.ok) {
+          if (response.status === 429) {
+            authError.textContent = "Too many attempts. Please wait a few minutes and try again.";
+          } else {
+            authError.textContent = data.detail || "Something went wrong.";
+          }
+          return;
+        }
+
+        authPassword.value = "";
+        await enterApp(data.email);
+      } catch (error) {
+        authError.textContent = "Network error. Please try again.";
+      } finally {
+        authSubmit.disabled = false;
+      }
+    }
+
+    authSubmit.addEventListener("click", submitAuth);
+    authPassword.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") submitAuth();
+    });
+
+    logoutButton.addEventListener("click", async () => {
+      await fetch("/auth/logout", { method: "POST", credentials: "same-origin" });
+      showAuthScreen();
+    });
+
+    function showAuthScreen(message) {
+      mainApp.classList.remove("visible");
+      account.style.display = "none";
+      authScreen.classList.add("visible");
+      authError.textContent = message || "";
+      setAuthMode("login");
+    }
+
+    async function enterApp(email) {
+      authScreen.classList.remove("visible");
+      account.style.display = "flex";
+      accountEmail.textContent = email;
+      mainApp.classList.add("visible");
+      currentConversationId = null;
+      addMessage("Hey, I'm Yapper AI. What's on your mind?", "bot");
+      setExpression("Hey, I'm Yapper AI. What's on your mind?");
+      await loadConversations();
+    }
+
+    // ---------- Boot: check session, show cold-start banner if slow ----------
+
+    async function boot() {
+      const slowTimer = setTimeout(() => {
+        bootBannerText.textContent =
+          "Still connecting... the free-tier server may be waking up from sleep (can take up to a minute).";
+        bootBanner.classList.add("visible");
+      }, 2500);
+
+      try {
+        const response = await fetch("/auth/me", { credentials: "same-origin" });
+        clearTimeout(slowTimer);
+        bootBanner.classList.remove("visible");
+
+        if (response.ok) {
+          const data = await response.json();
+          await enterApp(data.email);
+        } else {
+          showAuthScreen();
+        }
+      } catch (error) {
+        clearTimeout(slowTimer);
+        bootBannerText.textContent = "Could not reach the server. Please refresh the page.";
+        bootBanner.classList.add("visible");
+        showAuthScreen();
+      }
+    }
+
+    boot();
   </script>
 </body>
 </html>

@@ -1,20 +1,15 @@
 import asyncio
 import os
 import re
-import shutil
-import subprocess
-import threading
 import uuid
 from datetime import datetime
 from pathlib import Path
 
-import edge_tts
 import httpx
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
-from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, EmailStr, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,16 +21,13 @@ from db import get_db
 from models import Conversation, Message, User
 from tools import TOOL_SPECS, execute_tool_call
 
+# Voice output is browser SpeechSynthesis only in this build (see README) --
+# ElevenLabs and SadTalker are deliberately not part of the public product;
+# both exist in the original single-user project for local-only use.
+
 BASE_DIR = Path(__file__).resolve().parent
-STATIC_DIR = BASE_DIR / "static"
-AUDIO_DIR = STATIC_DIR / "audio"
-VIDEO_DIR = STATIC_DIR / "videos"
 
 load_dotenv(BASE_DIR / ".env")
-
-STATIC_DIR.mkdir(exist_ok=True)
-AUDIO_DIR.mkdir(exist_ok=True)
-VIDEO_DIR.mkdir(exist_ok=True)
 
 app = FastAPI(title="Yapper AI")
 
@@ -55,8 +47,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
 @app.on_event("startup")
@@ -121,10 +111,6 @@ SYSTEM_PROMPT = (
     "Do not use emojis unless the user asks for them. "
     "If you are unsure, say so clearly instead of making things up."
 )
-
-# Simple in-memory job store. This resets when the server restarts.
-VIDEO_JOBS: dict[str, dict[str, str | None]] = {}
-VIDEO_JOBS_LOCK = threading.Lock()
 
 
 @app.get("/")
@@ -225,24 +211,9 @@ async def chat(
     conversations.save_message(db, conversation.id, "assistant", reply)
     await db.commit()
 
-    audio_path = await safe_generate_voice_audio(reply)
-    audio_url = static_url(audio_path) if audio_path else None
-    job_id = None
-
-    # SadTalker is slow, so we only queue it and return immediately.
-    if sadtalker_is_enabled():
-        if not audio_path:
-            audio_path = await safe_text_to_speech(reply)
-
-        if audio_path:
-            job_id = start_video_job(audio_path)
-
     return {
         "reply": reply,
         "text": reply,
-        "audio_url": audio_url,
-        "video_url": None,
-        "job_id": job_id,
         "tools_used": tools_used,
         "conversation_id": str(conversation.id),
     }
@@ -282,17 +253,6 @@ async def get_conversation_messages(
     ]
 
 
-@app.get("/video-status/{job_id}")
-def video_status(job_id: str):
-    with VIDEO_JOBS_LOCK:
-        job = VIDEO_JOBS.get(job_id)
-
-    if not job:
-        raise HTTPException(status_code=404, detail="Video job not found.")
-
-    return job
-
-
 async def safe_call_openrouter(
     user_text: str, history: list[dict[str, str]], user_id: str
 ) -> tuple[str, list[str]]:
@@ -304,22 +264,6 @@ async def safe_call_openrouter(
             "Sorry, I had trouble reaching my AI brain just now. Try again in a moment.",
             [],
         )
-
-
-async def safe_generate_voice_audio(text: str) -> Path | None:
-    try:
-        return await generate_voice_audio(text)
-    except Exception as error:
-        print(f"Voice generation failed: {error}")
-        return None
-
-
-async def safe_text_to_speech(text: str) -> Path | None:
-    try:
-        return await text_to_speech(text)
-    except Exception as error:
-        print(f"Fallback TTS for SadTalker failed: {error}")
-        return None
 
 
 # Safety cap on LLM -> tool -> LLM round-trips within a single /chat turn.
@@ -440,195 +384,3 @@ def clean_history(history: list[dict[str, str]]) -> list[dict[str, str]]:
 
     return cleaned
 
-
-def static_url(path: Path) -> str:
-    return f"/static/{path.relative_to(STATIC_DIR)}"
-
-
-async def generate_voice_audio(text: str) -> Path | None:
-    provider = os.getenv("TTS_PROVIDER", "browser").lower()
-
-    if provider == "elevenlabs":
-        return await elevenlabs_text_to_speech(text)
-
-    return None
-
-
-async def elevenlabs_text_to_speech(text: str) -> Path:
-    api_key = os.getenv("ELEVENLABS_API_KEY")
-    if not api_key or api_key == "your_elevenlabs_api_key_here":
-        raise RuntimeError("TTS_PROVIDER is elevenlabs, but ELEVENLABS_API_KEY is missing.")
-
-    voice_id = os.getenv("ELEVENLABS_VOICE_ID", "JBFqnCBsd6RMkjVDRZzb")
-    model_id = os.getenv("ELEVENLABS_MODEL_ID", "eleven_flash_v2_5")
-    audio_id = uuid.uuid4().hex
-    audio_path = AUDIO_DIR / f"{audio_id}.mp3"
-
-    payload = {
-        "text": text[:4500],
-        "model_id": model_id,
-        "voice_settings": {
-            "stability": 0.45,
-            "similarity_boost": 0.8,
-            "style": 0.35,
-            "use_speaker_boost": True,
-        },
-    }
-
-    url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
-    params = {"output_format": "mp3_44100_128"}
-    headers = {
-        "xi-api-key": api_key,
-        "Content-Type": "application/json",
-        "Accept": "audio/mpeg",
-    }
-
-    try:
-        async with httpx.AsyncClient(timeout=60) as client:
-            response = await client.post(url, params=params, headers=headers, json=payload)
-    except httpx.RequestError as error:
-        raise RuntimeError(f"Could not reach ElevenLabs: {error}") from error
-
-    if response.status_code >= 400:
-        raise RuntimeError(f"ElevenLabs error: {response.text}")
-
-    audio_path.write_bytes(response.content)
-    return audio_path
-
-
-async def text_to_speech(text: str) -> Path:
-    audio_id = uuid.uuid4().hex
-    audio_path = AUDIO_DIR / f"{audio_id}.mp3"
-
-    if os.getenv("TTS_PROVIDER", "browser").lower() == "elevenlabs":
-        generated_path = await elevenlabs_text_to_speech(text)
-        shutil.copyfile(generated_path, audio_path)
-        return audio_path
-
-    try:
-        communicate = edge_tts.Communicate(text, voice="en-US-AriaNeural")
-        await communicate.save(str(audio_path))
-    except Exception as error:
-        raise RuntimeError(f"Text-to-speech failed: {error}") from error
-
-    return audio_path
-
-
-def sadtalker_is_enabled() -> bool:
-    return os.getenv("SADTALKER_ENABLED", "false").lower() == "true"
-
-
-def start_video_job(audio_path: Path) -> str:
-    job_id = uuid.uuid4().hex
-
-    with VIDEO_JOBS_LOCK:
-        VIDEO_JOBS[job_id] = {
-            "job_id": job_id,
-            "status": "queued",
-            "video_url": None,
-            "error": None,
-        }
-
-    thread = threading.Thread(
-        target=process_video_job,
-        args=(job_id, audio_path),
-        daemon=True,
-    )
-    thread.start()
-
-    return job_id
-
-
-def process_video_job(job_id: str, audio_path: Path) -> None:
-    set_video_job_status(job_id, "processing")
-
-    try:
-        video_url = run_sadtalker(audio_path)
-        set_video_job_status(job_id, "done", video_url=video_url)
-    except Exception as error:
-        print(f"SadTalker job {job_id} failed: {error}")
-        set_video_job_status(job_id, "failed", error=str(error))
-
-
-def set_video_job_status(
-    job_id: str,
-    status: str,
-    video_url: str | None = None,
-    error: str | None = None,
-) -> None:
-    with VIDEO_JOBS_LOCK:
-        job = VIDEO_JOBS.get(job_id)
-        if not job:
-            return
-
-        job["status"] = status
-        if video_url is not None:
-            job["video_url"] = video_url
-        if error is not None:
-            job["error"] = error
-
-
-def run_sadtalker(audio_path: Path) -> str:
-    sadtalker_path = Path(os.getenv("SADTALKER_PATH", "")).expanduser()
-    sadtalker_python = os.getenv("SADTALKER_PYTHON", "python")
-    face_image = Path(os.getenv("SADTALKER_FACE_IMAGE", "static/face.png"))
-
-    if not sadtalker_path.exists():
-        raise RuntimeError("SADTALKER_PATH does not exist.")
-
-    if not face_image.is_absolute():
-        face_image = BASE_DIR / face_image
-
-    if not face_image.exists():
-        raise RuntimeError("Face image not found. Put a face image at static/face.png.")
-
-    result_dir = VIDEO_DIR / audio_path.stem
-    result_dir.mkdir(parents=True, exist_ok=True)
-
-    command = [
-        sadtalker_python,
-        "inference.py",
-        "--driven_audio",
-        str(audio_path),
-        "--source_image",
-        str(face_image),
-        "--result_dir",
-        str(result_dir),
-        "--still",
-        "--preprocess",
-        "full",
-    ]
-
-    result = subprocess.run(
-        command,
-        cwd=sadtalker_path,
-        capture_output=True,
-        text=True,
-        timeout=1200,
-    )
-
-    if result.returncode != 0:
-        raise RuntimeError(f"SadTalker failed:\n{result.stderr or result.stdout}")
-
-    generated_video = find_latest_video(result_dir)
-    if not generated_video:
-        raise RuntimeError("SadTalker did not create a video.")
-
-    final_video = VIDEO_DIR / f"{audio_path.stem}.mp4"
-    shutil.copyfile(generated_video, final_video)
-
-    return f"/static/videos/{final_video.name}"
-
-
-async def generate_talking_face(audio_path: Path) -> str | None:
-    if not sadtalker_is_enabled():
-        return None
-
-    return await asyncio.to_thread(run_sadtalker, audio_path)
-
-
-def find_latest_video(folder: Path) -> Path | None:
-    videos = list(folder.rglob("*.mp4"))
-    if not videos:
-        return None
-    return max(videos, key=lambda path: path.stat().st_mtime)

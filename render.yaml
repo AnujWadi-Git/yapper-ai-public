@@ -10,7 +10,13 @@ services:
         sync: false
       - key: OPENROUTER_MODEL
         value: openrouter/free
-      - key: TTS_PROVIDER
-        value: browser
       - key: APP_NAME
         value: Yapper AI
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: ALLOWED_ORIGINS
+        value: https://yapper-ai-public.onrender.com
