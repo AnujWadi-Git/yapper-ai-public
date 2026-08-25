@@ -1,0 +1,786 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Yapper AI</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #f4f6f8;
+      color: #17202a;
+    }
+
+    .app {
+      width: min(920px, 100%);
+      margin: 0 auto;
+      padding: 24px;
+    }
+
+    h1 {
+      margin: 0 0 6px;
+      font-size: 32px;
+    }
+
+    .subtitle {
+      margin: 0 0 20px;
+      color: #52616f;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 1fr 320px;
+      gap: 16px;
+      align-items: start;
+    }
+
+    .panel {
+      background: #ffffff;
+      border: 1px solid #d9e1e8;
+      border-radius: 8px;
+      padding: 16px;
+    }
+
+    .chat-box {
+      min-height: 360px;
+      max-height: 520px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+
+    .message {
+      padding: 10px 12px;
+      border-radius: 8px;
+      line-height: 1.45;
+      white-space: pre-wrap;
+    }
+
+    .message.loading {
+      display: inline-flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .message.loading::after {
+      content: "";
+      width: 14px;
+      height: 14px;
+      border: 2px solid #9aa8b4;
+      border-top-color: #1f7a8c;
+      border-radius: 50%;
+      animation: spin 800ms linear infinite;
+    }
+
+    .user {
+      align-self: flex-end;
+      background: #dff2ff;
+      max-width: 82%;
+    }
+
+    .bot {
+      align-self: flex-start;
+      background: #eef2f5;
+      max-width: 82%;
+    }
+
+    .controls {
+      display: grid;
+      grid-template-columns: 1fr auto auto;
+      gap: 8px;
+    }
+
+    textarea {
+      width: 100%;
+      padding: 12px;
+      border: 1px solid #c8d2dc;
+      border-radius: 8px;
+      font-size: 16px;
+      font-family: inherit;
+      line-height: 1.4;
+      min-height: 48px;
+      max-height: 180px;
+      resize: vertical;
+    }
+
+    button {
+      border: 0;
+      border-radius: 8px;
+      padding: 0 14px;
+      font-size: 16px;
+      cursor: pointer;
+      background: #1f7a8c;
+      color: white;
+      min-height: 44px;
+    }
+
+    button.secondary {
+      background: #34495e;
+    }
+
+    button:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+
+    video {
+      width: 100%;
+      background: #111;
+      border-radius: 8px;
+      display: block;
+      aspect-ratio: 1 / 1;
+      object-fit: cover;
+    }
+
+    video.hidden {
+      display: none;
+    }
+
+    .avatar {
+      width: 100%;
+      aspect-ratio: 1 / 1;
+      border-radius: 8px;
+      background:
+        radial-gradient(circle at 50% 20%, rgba(255, 255, 255, 0.22), transparent 34%),
+        linear-gradient(145deg, #16293a, #273949 58%, #ead8bf);
+      border: 1px solid #d9e1e8;
+      display: grid;
+      place-items: center;
+      overflow: hidden;
+    }
+
+    .portrait {
+      width: 82%;
+      height: 92%;
+      position: relative;
+      display: grid;
+      justify-items: center;
+      align-items: end;
+    }
+
+    .shoulders {
+      width: 78%;
+      height: 26%;
+      border-radius: 46% 46% 0 0;
+      background: linear-gradient(145deg, #315b78, #1e3e59);
+      position: absolute;
+      bottom: 0;
+      box-shadow: 0 -8px 18px rgba(0, 0, 0, 0.14);
+    }
+
+    .neck {
+      width: 25%;
+      height: 20%;
+      border-radius: 0 0 999px 999px;
+      background: #c98f6f;
+      position: absolute;
+      bottom: 18%;
+      z-index: 1;
+    }
+
+    .ear {
+      width: 12%;
+      height: 18%;
+      border-radius: 999px;
+      background: #d8a07d;
+      position: absolute;
+      top: 34%;
+      z-index: 1;
+    }
+
+    .ear.left {
+      left: 18%;
+    }
+
+    .ear.right {
+      right: 18%;
+    }
+
+    .hair {
+      width: 58%;
+      height: 49%;
+      border-radius: 48% 48% 38% 38%;
+      background: linear-gradient(145deg, #202532, #10151f);
+      position: absolute;
+      top: 8%;
+      z-index: 1;
+      box-shadow: inset 0 10px 0 rgba(255, 255, 255, 0.04);
+    }
+
+    .hair::before {
+      content: "";
+      width: 56%;
+      height: 25%;
+      border-radius: 999px 999px 60% 60%;
+      background: #10151f;
+      position: absolute;
+      left: 3%;
+      top: 2%;
+      transform: rotate(-10deg);
+    }
+
+    .face {
+      width: 52%;
+      height: 58%;
+      border-radius: 44% 44% 48% 48%;
+      background: linear-gradient(145deg, #e2ad8a, #c98f6f);
+      position: relative;
+      margin-bottom: 24%;
+      z-index: 2;
+      box-shadow:
+        inset 0 -10px 0 rgba(0, 0, 0, 0.05),
+        0 16px 24px rgba(0, 0, 0, 0.16);
+      transition: transform 180ms ease;
+    }
+
+    .eye {
+      width: 9%;
+      height: 8%;
+      border-radius: 50%;
+      background: #101823;
+      position: absolute;
+      top: 40%;
+    }
+
+    .eye.left {
+      left: 29%;
+    }
+
+    .eye.right {
+      right: 29%;
+    }
+
+    .eyebrow {
+      width: 18%;
+      height: 3%;
+      border-radius: 999px;
+      background: #18202b;
+      position: absolute;
+      top: 32%;
+      transition: transform 180ms ease;
+    }
+
+    .eyebrow.left {
+      left: 24%;
+    }
+
+    .eyebrow.right {
+      right: 24%;
+    }
+
+    .nose {
+      width: 7%;
+      height: 17%;
+      border-radius: 999px;
+      border-right: 3px solid rgba(94, 52, 35, 0.28);
+      position: absolute;
+      left: 46%;
+      top: 43%;
+    }
+
+    .mouth {
+      width: 25%;
+      height: 5%;
+      border-radius: 0 0 999px 999px;
+      background: #7f2637;
+      position: absolute;
+      left: 37.5%;
+      top: 68%;
+      transition: all 120ms ease;
+      overflow: hidden;
+    }
+
+    .mouth::after {
+      content: "";
+      width: 100%;
+      height: 40%;
+      background: rgba(255, 152, 158, 0.72);
+      border-radius: 999px 999px 0 0;
+      position: absolute;
+      bottom: 0;
+      left: 0;
+    }
+
+    .avatar.speaking .face {
+      animation: talkHead 900ms ease-in-out infinite;
+    }
+
+    .avatar.speaking .mouth {
+      animation: talkMouth 260ms ease-in-out infinite;
+    }
+
+    .avatar.happy .mouth {
+      height: 8%;
+      border-radius: 0 0 999px 999px;
+      top: 67%;
+    }
+
+    .avatar.thinking .mouth {
+      width: 18%;
+      height: 3%;
+      left: 41%;
+      top: 70%;
+      border-radius: 999px;
+    }
+
+    .avatar.thinking .eyebrow.left {
+      transform: rotate(-10deg) translateY(-3px);
+    }
+
+    .avatar.thinking .eyebrow.right {
+      transform: rotate(10deg) translateY(-3px);
+    }
+
+    .avatar.serious .mouth {
+      height: 3%;
+      border-radius: 999px;
+      top: 70%;
+    }
+
+    .avatar.excited .face {
+      transform: scale(1.03);
+    }
+
+    .avatar.excited .mouth {
+      width: 30%;
+      height: 11%;
+      left: 35%;
+      top: 65%;
+      border-radius: 0 0 999px 999px;
+    }
+
+    @keyframes talkMouth {
+      0%, 100% {
+        height: 4%;
+        top: 69%;
+      }
+      50% {
+        height: 14%;
+        top: 63%;
+      }
+    }
+
+    @keyframes talkHead {
+      0%, 100% {
+        transform: translateY(0);
+      }
+      50% {
+        transform: translateY(-2%);
+      }
+    }
+
+    .status {
+      margin-top: 12px;
+      min-height: 22px;
+      color: #52616f;
+      font-size: 14px;
+      line-height: 1.4;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .status.hidden {
+      display: none;
+    }
+
+    .spinner {
+      width: 14px;
+      height: 14px;
+      border: 2px solid #c8d2dc;
+      border-top-color: #1f7a8c;
+      border-radius: 50%;
+      animation: spin 800ms linear infinite;
+      flex: 0 0 auto;
+    }
+
+    @keyframes spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+
+    @media (max-width: 760px) {
+      .layout {
+        grid-template-columns: 1fr;
+      }
+
+      .controls {
+        grid-template-columns: 1fr;
+      }
+
+      button {
+        width: 100%;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <h1>Yapper AI</h1>
+    <p class="subtitle">Type or talk. Yapper replies, speaks, and can generate a talking face video.</p>
+
+    <section class="layout">
+      <div class="panel">
+        <div id="chatBox" class="chat-box"></div>
+
+        <div class="controls">
+          <textarea id="messageInput" placeholder="Say something to Yapper... Use Shift+Enter for a new line."></textarea>
+          <button id="sendButton">Send</button>
+          <button id="micButton" class="secondary">Mic</button>
+        </div>
+      </div>
+
+      <aside class="panel">
+        <div id="avatar" class="avatar happy" aria-label="Animated Yapper human avatar">
+          <div class="portrait">
+            <div class="shoulders"></div>
+            <div class="neck"></div>
+            <div class="ear left"></div>
+            <div class="ear right"></div>
+            <div class="hair"></div>
+            <div class="face">
+              <div class="eyebrow left"></div>
+              <div class="eyebrow right"></div>
+              <div class="eye left"></div>
+              <div class="eye right"></div>
+              <div class="nose"></div>
+              <div class="mouth"></div>
+            </div>
+          </div>
+        </div>
+        <video id="faceVideo" class="hidden" controls playsinline></video>
+        <div id="videoStatus" class="status hidden"></div>
+      </aside>
+    </section>
+  </main>
+
+  <script>
+    const chatBox = document.getElementById("chatBox");
+    const messageInput = document.getElementById("messageInput");
+    const sendButton = document.getElementById("sendButton");
+    const micButton = document.getElementById("micButton");
+    const avatar = document.getElementById("avatar");
+    const faceVideo = document.getElementById("faceVideo");
+    const videoStatus = document.getElementById("videoStatus");
+    const conversationHistory = [];
+    let currentAudio = null;
+    let availableVoices = [];
+
+    function loadVoices() {
+      if (!("speechSynthesis" in window)) return;
+      availableVoices = window.speechSynthesis.getVoices();
+    }
+
+    loadVoices();
+    if ("speechSynthesis" in window) {
+      window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+
+    function addMessage(text, className) {
+      const message = document.createElement("div");
+      message.className = `message ${className}`;
+      message.textContent = text;
+      chatBox.appendChild(message);
+      chatBox.scrollTop = chatBox.scrollHeight;
+      return message;
+    }
+
+    function setVideoStatus(text, showSpinner) {
+      if (!text) {
+        videoStatus.className = "status hidden";
+        videoStatus.innerHTML = "";
+        return;
+      }
+
+      videoStatus.className = "status";
+      videoStatus.innerHTML = "";
+
+      if (showSpinner) {
+        const spinner = document.createElement("span");
+        spinner.className = "spinner";
+        videoStatus.appendChild(spinner);
+      }
+
+      const label = document.createElement("span");
+      label.textContent = text;
+      videoStatus.appendChild(label);
+    }
+
+    function showAvatar() {
+      avatar.style.display = "grid";
+      faceVideo.classList.add("hidden");
+    }
+
+    async function showVideo(videoUrl) {
+      avatar.style.display = "none";
+      faceVideo.classList.remove("hidden");
+      faceVideo.src = videoUrl + "?t=" + Date.now();
+      await faceVideo.play().catch(() => {});
+    }
+
+    function speak(text) {
+      if (!("speechSynthesis" in window)) return;
+
+      const speechText = cleanTextForSpeech(text);
+      if (!speechText || speechText.length > 700) return;
+
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(speechText);
+      const voice = pickVoice();
+
+      if (voice) utterance.voice = voice;
+      utterance.rate = 0.9;
+      utterance.pitch = 1.03;
+      utterance.volume = 1;
+      utterance.onstart = () => avatar.classList.add("speaking");
+      utterance.onend = () => avatar.classList.remove("speaking");
+      utterance.onerror = () => avatar.classList.remove("speaking");
+      window.speechSynthesis.speak(utterance);
+    }
+
+    async function playGeneratedAudio(audioUrl, fallbackText) {
+      if (!audioUrl) {
+        speak(fallbackText);
+        return;
+      }
+
+      if (currentAudio) {
+        currentAudio.pause();
+        currentAudio = null;
+      }
+
+      if ("speechSynthesis" in window) {
+        window.speechSynthesis.cancel();
+      }
+
+      currentAudio = new Audio(audioUrl + "?t=" + Date.now());
+      currentAudio.onplay = () => avatar.classList.add("speaking");
+      currentAudio.onended = () => avatar.classList.remove("speaking");
+      currentAudio.onerror = () => {
+        avatar.classList.remove("speaking");
+        speak(fallbackText);
+      };
+
+      await currentAudio.play().catch(() => {
+        avatar.classList.remove("speaking");
+        speak(fallbackText);
+      });
+    }
+
+    function setExpression(text) {
+      const lower = text.toLowerCase();
+      avatar.classList.remove("happy", "thinking", "serious", "excited");
+
+      if (/[?!]{2,}/.test(text) || lower.includes("awesome") || lower.includes("great")) {
+        avatar.classList.add("excited");
+      } else if (lower.includes("sorry") || lower.includes("error") || lower.includes("can't") || lower.includes("cannot")) {
+        avatar.classList.add("serious");
+      } else if (lower.includes("maybe") || lower.includes("let's think") || lower.includes("question")) {
+        avatar.classList.add("thinking");
+      } else {
+        avatar.classList.add("happy");
+      }
+    }
+
+    function pickVoice() {
+      const preferredNames = [
+        "Samantha",
+        "Karen",
+        "Moira",
+        "Daniel",
+        "Alex",
+        "Google US English",
+        "Microsoft Aria",
+        "Microsoft Jenny"
+      ];
+
+      return preferredNames
+        .map((name) => availableVoices.find((voice) => voice.name.includes(name)))
+        .find(Boolean) || availableVoices.find((voice) => voice.lang.startsWith("en")) || null;
+    }
+
+    function cleanTextForSpeech(text) {
+      return text
+        .replace(/```[\s\S]*?```/g, "I wrote a code block on screen.")
+        .replace(/`([^`]+)`/g, "$1")
+        .replace(/\*\*([^*]+)\*\*/g, "$1")
+        .replace(/https?:\/\/\S+/g, "a link")
+        .replace(/[\p{Emoji_Presentation}\p{Extended_Pictographic}]/gu, "")
+        .replace(/[•#>*_~]/g, "")
+        .replace(/\s+/g, " ")
+        .trim();
+    }
+
+    async function sendMessage(textFromMic) {
+      const text = (textFromMic || messageInput.value).trim();
+      if (!text) return;
+
+      addMessage(text, "user");
+      conversationHistory.push({ role: "user", content: text });
+      messageInput.value = "";
+      sendButton.disabled = true;
+      micButton.disabled = true;
+      setVideoStatus("", false);
+      showAvatar();
+      const thinkingMessage = addMessage("Yapper is thinking...", "bot loading");
+
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 130000);
+
+        const response = await fetch("/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: controller.signal,
+          body: JSON.stringify({
+            text,
+            history: conversationHistory.slice(-10)
+          })
+        });
+        clearTimeout(timeoutId);
+
+        const data = await response.json();
+        thinkingMessage.remove();
+
+        if (!response.ok) {
+          addMessage(data.detail || "Something went wrong.", "bot");
+          conversationHistory.pop();
+          return;
+        }
+
+        const reply = data.reply || data.text || "";
+
+        addMessage(reply, "bot");
+        if (Array.isArray(data.tools_used) && data.tools_used.length) {
+          const badge = document.createElement("div");
+          badge.className = "message bot";
+          badge.style.cssText =
+            "opacity:0.7;font-size:0.78rem;font-style:italic;padding-top:0;";
+          badge.textContent = "\u{1F527} used: " + data.tools_used.join(", ");
+          chatBox.appendChild(badge);
+          chatBox.scrollTop = chatBox.scrollHeight;
+        }
+        conversationHistory.push({ role: "assistant", content: reply });
+        setExpression(reply);
+        playGeneratedAudio(data.audio_url, reply);
+
+        if (data.video_url) {
+          setVideoStatus("", false);
+          await showVideo(data.video_url);
+        } else if (data.job_id) {
+          setVideoStatus("Generating lip-sync video...", true);
+          pollVideoStatus(data.job_id);
+        } else {
+          setVideoStatus("", false);
+          showAvatar();
+        }
+      } catch (error) {
+        thinkingMessage.remove();
+        conversationHistory.pop();
+        if (error.name === "AbortError") {
+          addMessage("That took too long. Try a shorter prompt or send it in smaller chunks.", "bot");
+        } else {
+          addMessage("Network error. Is the FastAPI server running?", "bot");
+        }
+      } finally {
+        sendButton.disabled = false;
+        micButton.disabled = false;
+        messageInput.focus();
+      }
+    }
+
+    async function pollVideoStatus(jobId) {
+      try {
+        const response = await fetch(`/video-status/${jobId}`);
+        const job = await response.json();
+
+        if (!response.ok) {
+          setVideoStatus(job.detail || "Video status unavailable.", false);
+          return;
+        }
+
+        if (job.status === "queued") {
+          setVideoStatus("Video queued...", true);
+          setTimeout(() => pollVideoStatus(jobId), 5000);
+          return;
+        }
+
+        if (job.status === "processing") {
+          setVideoStatus("Generating lip-sync video...", true);
+          setTimeout(() => pollVideoStatus(jobId), 5000);
+          return;
+        }
+
+        if (job.status === "done" && job.video_url) {
+          setVideoStatus("", false);
+          await showVideo(job.video_url);
+          return;
+        }
+
+        if (job.status === "failed") {
+          setVideoStatus("Video generation failed, but the reply and voice still work.", false);
+          showAvatar();
+          return;
+        }
+
+        setVideoStatus("Video status unknown.", false);
+      } catch (error) {
+        setVideoStatus("Could not check video status.", false);
+      }
+    }
+
+    function startMic() {
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+      if (!SpeechRecognition) {
+        alert("Speech recognition is not supported in this browser. Try Chrome.");
+        return;
+      }
+
+      const recognition = new SpeechRecognition();
+      recognition.lang = "en-US";
+      recognition.interimResults = false;
+      recognition.maxAlternatives = 1;
+
+      micButton.textContent = "Listening...";
+      micButton.disabled = true;
+
+      recognition.onresult = (event) => {
+        const transcript = event.results[0][0].transcript;
+        sendMessage(transcript);
+      };
+
+      recognition.onerror = () => {
+        alert("Could not hear you clearly. Try again.");
+      };
+
+      recognition.onend = () => {
+        micButton.textContent = "Mic";
+        micButton.disabled = false;
+      };
+
+      recognition.start();
+    }
+
+    sendButton.addEventListener("click", () => sendMessage());
+    micButton.addEventListener("click", startMic);
+    messageInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        sendMessage();
+      }
+    });
+
+    addMessage("Hey, I'm Yapper AI. What's on your mind?", "bot");
+    setExpression("Hey, I'm Yapper AI. What's on your mind?");
+  </script>
+</body>
+</html>
