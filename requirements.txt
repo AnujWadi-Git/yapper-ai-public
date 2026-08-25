@@ -6,4 +6,4 @@ edge-tts==7.0.0
 python-multipart==0.0.20
 fastembed==0.8.0
 pypdf==5.1.0
-numpy==2.2.1
+numpy
