@@ -51,3 +51,5 @@ were verified independently of the OpenRouter call.
 Billing/monetization, admin dashboard, email verification, password reset,
 SadTalker in the public build, ElevenLabs in the public build. Revisit only
 if paying for infrastructure becomes an option.
+
+<!-- auto-deploy verification: this line will be removed once confirmed -->
