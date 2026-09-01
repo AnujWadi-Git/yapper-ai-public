@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import time
+import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from threading import Lock
@@ -39,11 +40,20 @@ def verify_password(password: str, password_hash: str) -> bool:
         return False
 
 
+# Revoked-token guard for logout. Keyed by the token's own "jti" claim rather
+# than the raw token so revoked entries don't hold the full JWT in memory.
+# In-memory and per-process, same tradeoff as the rate limiter above: it
+# resets on restart/redeploy, meaning any pre-restart logout stops being
+# enforced -- fine for this MVP's traffic, revisit if that changes.
+_revoked_jtis: set[str] = set()
+_revoked_lock = Lock()
+
+
 def create_access_token(user_id: str) -> str:
     if not JWT_SECRET:
         raise RuntimeError("Missing JWT_SECRET.")
     expire = datetime.now(timezone.utc) + timedelta(days=JWT_EXPIRE_DAYS)
-    payload = {"sub": user_id, "exp": expire}
+    payload = {"sub": user_id, "exp": expire, "jti": uuid.uuid4().hex}
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
 
@@ -54,7 +64,22 @@ def decode_access_token(token: str) -> str | None:
         payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
     except jwt.PyJWTError:
         return None
+    with _revoked_lock:
+        if payload.get("jti") in _revoked_jtis:
+            return None
     return payload.get("sub")
+
+
+def revoke_token(token: str) -> None:
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+    except jwt.PyJWTError:
+        return
+    jti = payload.get("jti")
+    if not jti:
+        return
+    with _revoked_lock:
+        _revoked_jtis.add(jti)
 
 
 async def get_current_user_id(
@@ -82,34 +107,68 @@ def clear_session_cookie(response) -> None:
     response.delete_cookie(COOKIE_NAME, path="/")
 
 
-# --- Login rate limiting: brute-force guard, not a precision limiter.
+# --- Rate limiting: brute-force / mass-signup guard, not a precision limiter.
 # In-memory and per-process -- fine at this scale (no Redis needed); resets
 # on restart/redeploy, which just means attempt counts reset too.
 
 LOGIN_WINDOW_SECONDS = 15 * 60
 LOGIN_MAX_ATTEMPTS = 5
 
-_login_attempts: dict[str, list[float]] = {}
-_login_lock = Lock()
+# Looser than login (real users rarely sign up more than once), but present --
+# an unlimited signup endpoint lets one IP mint accounts to multiply its
+# effective /chat quota past the per-user daily message cap.
+SIGNUP_WINDOW_SECONDS = 60 * 60
+SIGNUP_MAX_ATTEMPTS = 5
+
+_attempts: dict[tuple[str, str], list[float]] = {}
+_attempts_lock = Lock()
 
 
 def _client_ip(request: Request) -> str:
+    # Render's own community reports disagree on whether X-Forwarded-For is
+    # trustworthy or client-spoofable on their platform (there's an open
+    # Render feedback thread titled "Send the correct X-Forwarded-For" about
+    # exactly this). Cloudflare -- which sits in front of Render's edge --
+    # sets CF-Connecting-IP itself and overwrites any client-supplied copy,
+    # so prefer that when present; it's a stronger guarantee than XFF here.
+    cf_ip = request.headers.get("cf-connecting-ip")
+    if cf_ip:
+        return cf_ip.strip()
     forwarded = request.headers.get("x-forwarded-for")
     if forwarded:
         return forwarded.split(",")[0].strip()
     return request.client.host if request.client else "unknown"
 
 
-def enforce_login_rate_limit(request: Request) -> None:
-    ip = _client_ip(request)
+def _enforce_rate_limit(
+    request: Request, bucket: str, window_seconds: int, max_attempts: int, message: str
+) -> None:
+    key = (bucket, _client_ip(request))
     now = time.monotonic()
-    with _login_lock:
-        attempts = [t for t in _login_attempts.get(ip, []) if now - t < LOGIN_WINDOW_SECONDS]
-        if len(attempts) >= LOGIN_MAX_ATTEMPTS:
-            _login_attempts[ip] = attempts
-            raise HTTPException(
-                status_code=429,
-                detail="Too many login attempts. Please wait a few minutes and try again.",
-            )
+    with _attempts_lock:
+        attempts = [t for t in _attempts.get(key, []) if now - t < window_seconds]
+        if len(attempts) >= max_attempts:
+            _attempts[key] = attempts
+            raise HTTPException(status_code=429, detail=message)
         attempts.append(now)
-        _login_attempts[ip] = attempts
+        _attempts[key] = attempts
+
+
+def enforce_login_rate_limit(request: Request) -> None:
+    _enforce_rate_limit(
+        request,
+        "login",
+        LOGIN_WINDOW_SECONDS,
+        LOGIN_MAX_ATTEMPTS,
+        "Too many login attempts. Please wait a few minutes and try again.",
+    )
+
+
+def enforce_signup_rate_limit(request: Request) -> None:
+    _enforce_rate_limit(
+        request,
+        "signup",
+        SIGNUP_WINDOW_SECONDS,
+        SIGNUP_MAX_ATTEMPTS,
+        "Too many accounts created from this network. Please wait an hour and try again.",
+    )

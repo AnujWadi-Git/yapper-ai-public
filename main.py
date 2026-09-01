@@ -7,7 +7,7 @@ from pathlib import Path
 
 import httpx
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, HTTPException, Request, UploadFile
+from fastapi import Cookie, Depends, FastAPI, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, EmailStr, field_validator
@@ -124,7 +124,11 @@ def favicon():
 
 
 @app.post("/auth/signup", response_model=AuthResponse)
-async def signup(payload: SignupRequest, response: Response, db: AsyncSession = Depends(get_db)):
+async def signup(
+    payload: SignupRequest, request: Request, response: Response, db: AsyncSession = Depends(get_db)
+):
+    auth.enforce_signup_rate_limit(request)
+
     email = payload.email.strip().lower()
 
     existing = await db.scalar(select(User).where(User.email == email))
@@ -156,7 +160,9 @@ async def login(
 
 
 @app.post("/auth/logout")
-def logout(response: Response):
+def logout(response: Response, session_token: str | None = Cookie(default=None, alias=auth.COOKIE_NAME)):
+    if session_token:
+        auth.revoke_token(session_token)
     auth.clear_session_cookie(response)
     return {"ok": True}
 
@@ -169,9 +175,19 @@ async def me(user_id: str = Depends(auth.get_current_user_id), db: AsyncSession 
     return AuthResponse(email=user.email)
 
 
+MAX_UPLOAD_BYTES = 5 * 1024 * 1024  # 5MB -- guards the free-tier 512MB instance from an OOM
+
+
 @app.post("/documents/upload")
 async def upload_document(file: UploadFile, user_id: str = Depends(auth.get_current_user_id)):
-    content = await file.read()
+    # Read one byte past the cap so an over-limit file is rejected without
+    # ever buffering the full (potentially huge) upload in memory.
+    content = await file.read(MAX_UPLOAD_BYTES + 1)
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large. Limit is {MAX_UPLOAD_BYTES // (1024 * 1024)}MB.",
+        )
     try:
         result = await asyncio.to_thread(
             rag.document_store.add_document, user_id, file.filename or "document", content
