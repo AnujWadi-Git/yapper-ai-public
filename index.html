@@ -688,14 +688,35 @@
       window.speechSynthesis.onvoiceschanged = loadVoices;
     }
 
+    // Curated fallback, best quality first, used only if no voice matches
+    // the quality-keyword scan below (e.g. an older/plainer browser voice list).
+    const PREFERRED_VOICE_NAMES = [
+      "Samantha", "Ava", "Allison", "Karen", "Moira", "Daniel", "Alex",
+      "Google US English", "Microsoft Aria", "Microsoft Jenny", "Microsoft Guy"
+    ];
+
+    // Most browsers label their best-quality voices with one of these terms
+    // (Edge/Chrome's "Online (Natural)" voices, Safari's enhanced/premium
+    // voices, etc.) -- prefer those over a same-named "compact" voice.
+    const QUALITY_KEYWORDS = ["natural", "neural", "premium", "enhanced", "studio"];
+
+    function voiceScore(voice) {
+      const name = voice.name.toLowerCase();
+      let score = 0;
+      if (QUALITY_KEYWORDS.some((keyword) => name.includes(keyword))) score += 10;
+      const preferredIndex = PREFERRED_VOICE_NAMES.findIndex((n) => voice.name.includes(n));
+      if (preferredIndex !== -1) score += PREFERRED_VOICE_NAMES.length - preferredIndex;
+      if (voice.lang === "en-US") score += 2;
+      else if (voice.lang.startsWith("en")) score += 1;
+      if (voice.localService) score += 1; // local voices have less playback latency
+      return score;
+    }
+
     function pickVoice() {
-      const preferredNames = [
-        "Samantha", "Karen", "Moira", "Daniel", "Alex",
-        "Google US English", "Microsoft Aria", "Microsoft Jenny"
-      ];
-      return preferredNames
-        .map((name) => availableVoices.find((voice) => voice.name.includes(name)))
-        .find(Boolean) || availableVoices.find((voice) => voice.lang.startsWith("en")) || null;
+      if (!availableVoices.length) return null;
+      return availableVoices.reduce((best, voice) =>
+        voiceScore(voice) > voiceScore(best) ? voice : best
+      );
     }
 
     function cleanTextForSpeech(text) {
@@ -710,22 +731,53 @@
         .trim();
     }
 
+    // Chrome silently stops mid-utterance on long text, so long replies are
+    // split into sentence-sized chunks and spoken back to back instead of
+    // being handed to speechSynthesis as one long string.
+    const SPEECH_CHUNK_MAX_CHARS = 200;
+
+    function chunkForSpeech(text) {
+      const sentences = text.match(/[^.!?]+[.!?]+(\s+|$)|[^.!?]+$/g) || [text];
+      const chunks = [];
+      let current = "";
+
+      for (const sentence of sentences) {
+        if (current && (current + sentence).length > SPEECH_CHUNK_MAX_CHARS) {
+          chunks.push(current.trim());
+          current = "";
+        }
+        current += sentence;
+      }
+      if (current.trim()) chunks.push(current.trim());
+      return chunks;
+    }
+
     function speak(text) {
       if (!("speechSynthesis" in window)) return;
       const speechText = cleanTextForSpeech(text);
-      if (!speechText || speechText.length > 700) return;
+      if (!speechText) return;
 
       window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(speechText);
       const voice = pickVoice();
-      if (voice) utterance.voice = voice;
-      utterance.rate = 0.9;
-      utterance.pitch = 1.03;
-      utterance.volume = 1;
-      utterance.onstart = () => avatar.classList.add("speaking");
-      utterance.onend = () => avatar.classList.remove("speaking");
-      utterance.onerror = () => avatar.classList.remove("speaking");
-      window.speechSynthesis.speak(utterance);
+      const chunks = chunkForSpeech(speechText);
+
+      const speakChunk = (index) => {
+        if (index >= chunks.length) {
+          avatar.classList.remove("speaking");
+          return;
+        }
+        const utterance = new SpeechSynthesisUtterance(chunks[index]);
+        if (voice) utterance.voice = voice;
+        utterance.rate = 0.9;
+        utterance.pitch = 1.03;
+        utterance.volume = 1;
+        utterance.onstart = () => avatar.classList.add("speaking");
+        utterance.onend = () => speakChunk(index + 1);
+        utterance.onerror = () => speakChunk(index + 1);
+        window.speechSynthesis.speak(utterance);
+      };
+
+      speakChunk(0);
     }
 
     function setExpression(text) {
